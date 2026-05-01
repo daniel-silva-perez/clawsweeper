@@ -46,6 +46,7 @@ import {
   type Args,
 } from "./clawsweeper-args.js";
 import { escapeRegExp, safeOutputTail, trimMiddle, truncateText } from "./clawsweeper-text.js";
+import { createLLMProvider, runLLM, type LLMProvider } from "./llm-providers.js";
 
 export { codexEnv } from "./codex-env.js";
 export { parseGhJson, parseGhJsonLines } from "./github-json.js";
@@ -536,7 +537,8 @@ const WEEKLY_REVIEW_DAYS = 7;
 const STALE_INSUFFICIENT_INFO_MIN_AGE_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RECENT_MISSING_OPEN_MS = DAY_MS;
-const DEFAULT_CODEX_MODEL = "gpt-5.5";
+const DEFAULT_LLM_MODEL = process.env.LLM_MODEL ?? "gpt-5.5";
+const DEFAULT_LLM_PROVIDER = process.env.LLM_PROVIDER ?? "codex";
 const DEFAULT_REASONING_EFFORT = "high";
 const DEFAULT_SERVICE_TIER = "fast";
 const REVIEW_POLICY_VERSION = "2026-04-29-policy-v12";
@@ -930,7 +932,7 @@ function reviewPolicyHash(options: {
     stableJson({
       version: REVIEW_POLICY_VERSION,
       freshDays: FRESH_DAYS,
-      model: options.model ?? DEFAULT_CODEX_MODEL,
+      model: options.model ?? DEFAULT_LLM_MODEL,
       reasoningEffort: options.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
       sandboxMode: options.sandboxMode ?? "read-only",
       serviceTier: options.serviceTier ?? DEFAULT_SERVICE_TIER,
@@ -2840,12 +2842,12 @@ ${extra}
 }
 
 function codexFailureReason(detail: string): string {
-  if (detail.includes("Codex dirtied the OpenClaw checkout")) return "dirty checkout";
+  if (detail.includes("dirtied the checkout")) return "dirty checkout";
   if (detail.includes("did not produce output")) return "missing structured output";
   if (detail.includes("invalid JSON")) return "invalid structured output";
   if (detail.includes("ENOBUFS") || detail.includes("maxBuffer")) return "output buffer overflow";
   if (detail.includes("timed out") || detail.includes("ETIMEDOUT")) return "timeout";
-  return "codex execution failed";
+  return "LLM execution failed";
 }
 
 function codexFailureDecision(status: number | null, stderr: string, stdout = ""): Decision {
@@ -2855,25 +2857,23 @@ function codexFailureDecision(status: number | null, stderr: string, stdout = ""
     decision: "keep_open",
     closeReason: "none",
     confidence: "low",
-    summary: `Codex review failed: ${reason}${status === null ? "" : ` (exit ${status})`}.`,
+    summary: `LLM review failed: ${reason}${status === null ? "" : ` (exit ${status})`}.`,
     changeSummary: "Review failed before ClawSweeper could summarize the requested change.",
     evidence: [
       evidenceEntry({ label: "failure reason", detail: reason }),
-      evidenceEntry({ label: "codex failure detail", detail: trimMiddle(detail, 4000) }),
-      evidenceEntry({ label: "codex stdout", detail: trimMiddle(stdout || "No stdout.", 2000) }),
+      evidenceEntry({ label: "LLM failure detail", detail: trimMiddle(detail, 4000) }),
+      evidenceEntry({ label: "LLM stdout", detail: trimMiddle(stdout || "No stdout.", 2000) }),
     ],
-    likelyOwners: [
-      {
-        person: "unknown",
-        role: "review did not complete",
-        reason: "Codex failed before it could trace repository history.",
-        commits: [],
-        files: [],
-        confidence: "low",
-      },
-    ],
+    likelyOwners: [{
+      person: "unknown",
+      role: "review did not complete",
+      reason: "LLM failed before it could trace repository history.",
+      commits: [],
+      files: [],
+      confidence: "low",
+    }],
     risks: ["No close action taken because the review did not complete."],
-    bestSolution: "Retry the Codex review after fixing the execution failure.",
+    bestSolution: "Retry the LLM review after fixing the execution failure.",
     reproductionAssessment:
       "Unclear. The review failed before ClawSweeper could establish a reproduction path.",
     solutionAssessment:
@@ -2881,7 +2881,7 @@ function codexFailureDecision(status: number | null, stderr: string, stdout = ""
     reviewFindings: [],
     securityReview: {
       status: "not_applicable",
-      summary: "Security review did not run because the Codex review failed before completion.",
+      summary: "Security review did not run because the LLM review failed before completion.",
       concerns: [],
     },
     overallCorrectness: "not a patch",
@@ -2923,6 +2923,7 @@ function runCodex(options: {
   context: ItemContext;
   git: GitInfo;
   model: string;
+  provider: string;
   openclawDir: string;
   reasoningEffort: string;
   sandboxMode: string;
@@ -2945,55 +2946,37 @@ function runCodex(options: {
       `OpenClaw checkout is dirty before reviewing #${options.item.number}:\n${dirtyBefore}`,
     );
   }
-  const result = spawnSync(
-    "codex",
-    [
-      "exec",
-      "-m",
-      options.model,
-      "-c",
-      `model_reasoning_effort="${options.reasoningEffort}"`,
-      "-c",
-      `service_tier="${options.serviceTier}"`,
-      "-c",
-      'forced_login_method="api"',
-      "-c",
-      'approval_policy="never"',
-      "-C",
-      options.openclawDir,
-      "--output-schema",
-      join(ROOT, "schema", "clawsweeper-decision.schema.json"),
-      "--output-last-message",
-      outputPath,
-      "--sandbox",
-      options.sandboxMode,
-      "-",
-    ],
-    {
-      cwd: options.openclawDir,
-      encoding: "utf8",
-      env: codexEnv(),
-      input: readFileSync(promptPath, "utf8"),
-      maxBuffer: 128 * 1024 * 1024,
-      timeout: options.timeoutMs,
-    },
-  );
+
+  const llmProvider = createLLMProvider(options.provider);
+  const result = runLLM(llmProvider, {
+    promptPath,
+    outputPath,
+    model: options.model,
+    reasoningEffort: options.reasoningEffort,
+    serviceTier: options.serviceTier,
+    sandboxMode: options.sandboxMode,
+    timeoutMs: options.timeoutMs,
+    workDir: options.workDir,
+    repoDir: options.openclawDir,
+    schemaPath: join(ROOT, "schema", "clawsweeper-decision.schema.json"),
+  });
+
   const dirtyAfter = openclawDirtyStatus(options.openclawDir);
   if (dirtyAfter) {
     throw new Error(
-      `Codex dirtied the OpenClaw checkout while reviewing #${options.item.number}:\n${dirtyAfter}`,
+      `${llmProvider.name} dirtied the OpenClaw checkout while reviewing #${options.item.number}:\n${dirtyAfter}`,
     );
   }
   if (result.error) {
     throw new Error(
-      `Codex review failed for #${options.item.number}: ${result.error.message}\n${
+      `${llmProvider.name} review failed for #${options.item.number}: ${result.error.message}\n${
         safeOutputTail(result.stderr) || safeOutputTail(result.stdout) || "No output."
       }`,
     );
   }
   if (result.status !== 0) {
     throw new Error(
-      `Codex review failed for #${options.item.number} with exit ${
+      `${llmProvider.name} review failed for #${options.item.number} with exit ${
         result.status ?? "unknown"
       }.\n${safeOutputTail(result.stderr) || safeOutputTail(result.stdout) || "No output."}`,
     );
@@ -3001,11 +2984,11 @@ function runCodex(options: {
   if (!existsSync(outputPath)) {
     const decision = codexFailureDecision(
       result.status,
-      `Codex exited successfully but did not write ${outputPath}.`,
+      `${llmProvider.name} exited successfully but did not write ${outputPath}.`,
       result.stdout,
     );
     throw new Error(
-      `Codex review did not produce output for #${options.item.number}: ${decision.evidence
+      `${llmProvider.name} review did not produce output for #${options.item.number}: ${decision.evidence
         .map((entry) => entry.detail)
         .join("\n")}`,
     );
@@ -3015,13 +2998,13 @@ function runCodex(options: {
   } catch (error) {
     const decision = codexFailureDecision(
       result.status,
-      `Codex wrote invalid JSON or schema-invalid output to ${outputPath}: ${
+      `${llmProvider.name} wrote invalid JSON or schema-invalid output to ${outputPath}: ${
         error instanceof Error ? error.message : String(error)
       }`,
       result.stdout,
     );
     throw new Error(
-      `Codex review wrote invalid JSON for #${options.item.number}: ${decision.evidence
+      `${llmProvider.name} review produced invalid output for #${options.item.number}: ${decision.evidence
         .map((entry) => entry.detail)
         .join("\n")}`,
     );
@@ -4918,10 +4901,11 @@ function planCommand(args: Args): void {
   const itemNumbers = itemNumbersArg(args.item_numbers, args.item_number);
   const hasItemNumbersInput = typeof args.item_numbers === "string" && args.item_numbers.trim();
   const hotIntake = boolArg(args.hot_intake);
-  const model = stringArg(args.codex_model, DEFAULT_CODEX_MODEL);
-  const reasoningEffort = stringArg(args.codex_reasoning_effort, DEFAULT_REASONING_EFFORT);
-  const sandboxMode = stringArg(args.codex_sandbox, "read-only");
-  const serviceTier = stringArg(args.codex_service_tier, DEFAULT_SERVICE_TIER);
+  const model = stringArg(args.llm_model ?? args.codex_model, DEFAULT_LLM_MODEL);
+  const provider = stringArg(args.llm_provider ?? args.codex_provider, DEFAULT_LLM_PROVIDER);
+  const reasoningEffort = stringArg(args.llm_reasoning_effort ?? args.codex_reasoning_effort, DEFAULT_REASONING_EFFORT);
+  const sandboxMode = stringArg(args.llm_sandbox ?? args.codex_sandbox, "read-only");
+  const serviceTier = stringArg(args.llm_service_tier ?? args.codex_service_tier, DEFAULT_SERVICE_TIER);
   const reviewPolicy = reviewPolicyHash({ model, reasoningEffort, sandboxMode, serviceTier });
   const planOptions: Parameters<typeof planCandidates>[0] = {
     batchSize,
@@ -4958,10 +4942,11 @@ function reviewCommand(args: Args): void {
   const itemsDir = resolve(stringArg(args.items_dir, defaultItemsDir()));
   const batchSize = numberArg(args.batch_size, DEFAULT_PLAN_BATCH_SIZE);
   const maxPages = numberArg(args.max_pages, 250);
-  const model = stringArg(args.codex_model, DEFAULT_CODEX_MODEL);
-  const reasoningEffort = stringArg(args.codex_reasoning_effort, DEFAULT_REASONING_EFFORT);
-  const sandboxMode = stringArg(args.codex_sandbox, "read-only");
-  const serviceTier = stringArg(args.codex_service_tier, DEFAULT_SERVICE_TIER);
+  const model = stringArg(args.llm_model ?? args.codex_model, DEFAULT_LLM_MODEL);
+  const provider = stringArg(args.llm_provider ?? args.codex_provider, DEFAULT_LLM_PROVIDER);
+  const reasoningEffort = stringArg(args.llm_reasoning_effort ?? args.codex_reasoning_effort, DEFAULT_REASONING_EFFORT);
+  const sandboxMode = stringArg(args.llm_sandbox ?? args.codex_sandbox, "read-only");
+  const serviceTier = stringArg(args.llm_service_tier ?? args.codex_service_tier, DEFAULT_SERVICE_TIER);
   const timeoutMs = numberArg(args.codex_timeout_ms, 600_000);
   const additionalPrompt = stringArg(
     args.additional_prompt,
@@ -5032,6 +5017,7 @@ function reviewCommand(args: Args): void {
         context,
         git,
         model,
+        provider,
         openclawDir,
         reasoningEffort,
         sandboxMode,
@@ -5045,7 +5031,7 @@ function reviewCommand(args: Args): void {
       decision = codexFailureDecision(
         null,
         error instanceof Error ? error.message : String(error),
-        "Per-item Codex failure; continuing with the rest of the shard.",
+        "Per-item LLM failure; continuing with the rest of the shard.",
       );
     }
     const runtime = { model, reasoningEffort, sandboxMode, serviceTier };
