@@ -1,16 +1,16 @@
 # AGENTS.MD
 
-ClawSweeper is the conservative maintenance bot for OpenClaw repositories.
+SweepAI is a conservative AI maintenance bot for any repository.
 Keep changes narrow, evidence-backed, and automation-safe.
 
 ## Structure
 
 - Main code: `src/clawsweeper.ts`.
 - Repair lane code: `src/repair/`; durable generated state lives in
-  `openclaw/clawsweeper-state`.
+  `yourname/sweepai-state`.
 - Tests: `test/clawsweeper.test.ts`.
 - Workflow: `.github/workflows/sweep.yml`.
-- Explainer: `README.md`; state/dashboard repo: `../clawsweeper-state`.
+- Explainer: `README.md`; state/dashboard repo: `../sweepai-state`.
 - Open/reviewed records in state repo:
   `records/<repo-slug>/items/<number>.md`.
 - Archived records in state repo:
@@ -23,31 +23,31 @@ not split reports into issue/PR subtrees.
 ## Operating Model
 
 - Review lane is proposal-only. It never closes GitHub items.
-- Apply lane mutates GitHub by syncing the durable Codex review comment and then
+- Apply lane mutates GitHub by syncing the durable LLM review comment and then
   closing only unchanged, high-confidence proposals.
-- Repository-specific rules live in `src/repository-profiles.ts`; ClawHub apply
-  may close only PRs that are certainly implemented on `main`.
+- Repository-specific rules live in `src/repository-profiles.ts`; you can
+  configure close rules per repo.
 - Worker concurrency is shard-level: each shard processes its selected items
-  sequentially. Maximum parallel Codex sessions equals `shard_count`, not
+  sequentially. Maximum parallel LLM sessions equals `shard_count`, not
   `batch_size * shard_count`.
-- `openclaw/clawsweeper-state` is the live status surface and generated state
+- `yourname/sweepai-state` is the live status surface and generated state
   store. Check current Actions and that repo before trusting local generated
   timestamps.
-- When Peter asks about PRs outside `openclaw/clawsweeper`, treat the task as
-  monitoring/debugging how ClawSweeper workflows operate on that PR. Do not fix
-  foreign PR branches directly; ClawSweeper repair/automerge workflows own those
+- When asked about PRs outside this repo, treat the task as
+  monitoring/debugging how SweepAI workflows operate on that PR. Do not fix
+  foreign PR branches directly; SweepAI repair/automerge workflows own those
   branch edits.
 - When referencing GitHub issues or PRs in user-facing output, always include
   the full GitHub URL, not only `#12345`.
 
 ## Safety Rules
 
-- Do not run live apply/close commands unless Peter explicitly asks.
+- Do not run live apply/close commands unless explicitly asked.
 - For apply-path repros, copy one report into a temp `items/` dir and pass
   `--skip-dashboard`, `--item-number`, and a temp `--closed-dir`.
 - Treat maintainer-authored and protected-label items as non-closeable.
 - Snapshot or `updated_at` drift blocks apply unless the only change is the
-  existing ClawSweeper review comment.
+  existing SweepAI review comment.
 - Open-but-locked issues can exist when stale automation locked a closed issue
   and the author later reopened it. These must be skipped, not allowed to crash
   the apply run.
@@ -72,9 +72,9 @@ Use `pnpm run check` before handoff for code/test/workflow changes.
 Useful live probes:
 
 ```bash
-gh run list --repo openclaw/clawsweeper --limit 20 --json databaseId,displayTitle,status,conclusion,createdAt,updatedAt
-gh api repos/openclaw/clawsweeper/readme --jq '.content' | base64 --decode
-gh api graphql -f query='query { repository(owner:"openclaw", name:"openclaw") { issues(states: OPEN) { totalCount } pullRequests(states: OPEN) { totalCount } } }'
+gh run list --repo daniel-silva-perez/sweepai --limit 20 --json databaseId,displayTitle,status,conclusion,createdAt,updatedAt
+gh api repos/daniel-silva-perez/sweepai/readme --jq '.content' | base64 --decode
+gh api graphql -f query='query { repository(owner:"yourname", name:"yourrepo") { issues(states: OPEN) { totalCount } pullRequests(states: OPEN) { totalCount } } }'
 ```
 
 For throughput/default tuning, inspect and update both `src/clawsweeper.ts` and

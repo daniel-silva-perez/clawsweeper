@@ -1,8 +1,8 @@
 # Commit Review Dispatcher
 
-`openclaw/clawsweeper` can review commits that land on a target repository's
+`openclaw/sweepai` can review commits that land on a target repository's
 `main` branch. The target repository forwards `push` events with
-`repository_dispatch`; ClawSweeper expands the pushed range into one worker per
+`repository_dispatch`; SweepAI expands the pushed range into one worker per
 commit, writes one markdown report per commit, and optionally creates a GitHub
 Check Run on each reviewed commit when checks are enabled.
 
@@ -16,13 +16,13 @@ That path is canonical. Rerunning a commit review overwrites the existing report
 for that SHA, including manual reruns with an additional prompt.
 
 Copy this workflow into each target repository as
-`.github/workflows/clawsweeper-commit-dispatch.yml`, or merge the `push` trigger
+`.github/workflows/sweepai-commit-dispatch.yml`, or merge the `push` trigger
 and `Dispatch commit review` step into the combined dispatcher from
 [target-dispatcher.md](target-dispatcher.md). `openclaw/openclaw` uses the
-combined `.github/workflows/clawsweeper-dispatch.yml` form.
+combined `.github/workflows/sweepai-dispatch.yml` form.
 
 ```yaml
-name: ClawSweeper Commit Dispatch
+name: SweepAI Commit Dispatch
 
 on:
   push:
@@ -32,7 +32,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: clawsweeper-commit-dispatch-${{ github.repository }}-${{ github.sha }}
+  group: sweepai-commit-dispatch-${{ github.repository }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -43,7 +43,7 @@ jobs:
       HAS_CLAWSWEEPER_APP_PRIVATE_KEY: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY != '' }}
       CLAWSWEEPER_APP_CLIENT_ID: Iv23liOECG0slfuhz093
     steps:
-      - name: Create ClawSweeper dispatch token
+      - name: Create SweepAI dispatch token
         id: token
         if: ${{ env.HAS_CLAWSWEEPER_APP_PRIVATE_KEY == 'true' }}
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
@@ -51,7 +51,7 @@ jobs:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
           owner: openclaw
-          repositories: clawsweeper
+          repositories: sweepai
 
       - name: Dispatch commit review
         env:
@@ -75,8 +75,8 @@ jobs:
             --arg after_sha "$AFTER_SHA" \
             --arg ref "refs/heads/main" \
             --argjson create_checks "$create_checks" \
-            '{event_type:"clawsweeper_commit_review",client_payload:{target_repo:$target_repo,before_sha:$before_sha,after_sha:$after_sha,ref:$ref,enabled:true,create_checks:$create_checks}}')"
-          gh api repos/openclaw/clawsweeper/dispatches \
+            '{event_type:"sweepai_commit_review",client_payload:{target_repo:$target_repo,before_sha:$before_sha,after_sha:$after_sha,ref:$ref,enabled:true,create_checks:$create_checks}}')"
+          gh api repos/openclaw/sweepai/dispatches \
             --method POST \
             --input - <<< "$payload"
 ```
@@ -94,7 +94,7 @@ CLAWSWEEPER_COMMIT_REVIEW_CREATE_CHECKS=true
 ```
 
 The receiver waits 15 minutes before selecting commits by default. Adjust on
-`openclaw/clawsweeper` only when needed:
+`openclaw/sweepai` only when needed:
 
 ```text
 CLAWSWEEPER_COMMIT_REVIEW_SETTLE_SECONDS=900
@@ -104,10 +104,10 @@ Use `0` for settled manual backfills.
 
 `openclaw/clawhub` commit dispatches are skipped while
 `CLAWSWEEPER_ENABLE_CLAWHUB` is not `1`. Turn that receiver variable on only
-after the ClawSweeper GitHub App is installed on `openclaw/clawhub`; otherwise
+after the SweepAI GitHub App is installed on `openclaw/clawhub`; otherwise
 the receiver cannot mint a target read token for commit review.
 
-Manual reviews can be started from the `ClawSweeper Commit Review` workflow in
+Manual reviews can be started from the `SweepAI Commit Review` workflow in
 this repository. Inputs:
 
 - `target_repo`: target repository, default `openclaw/openclaw`
@@ -124,6 +124,6 @@ Large ranges are paged automatically. Each workflow run starts one matrix worker
 per commit for up to GitHub's matrix limit, then dispatches the next page until
 the whole range has one report per commit.
 
-When enabled, the check name is `ClawSweeper Commit Review`. Clean
+When enabled, the check name is `SweepAI Commit Review`. Clean
 high-confidence reports use `success`; high-confidence high/critical findings
 use `failure`; inconclusive or lower-confidence findings use `neutral`.

@@ -1,6 +1,6 @@
 # Commit Sweeper
 
-Commit Sweeper reviews commits that land on a target repository's `main` branch.
+SweepAI reviews commits that land on a target repository's `main` branch.
 It is intentionally separate from the issue/PR cleanup sweeper: it does not
 close items, write comments, or try to fix code. It produces one markdown report
 per commit. It can optionally publish a GitHub Check Run for the commit when
@@ -10,10 +10,10 @@ per commit. It can optionally publish a GitHub Check Run for the commit when
 
 - Review every code-bearing commit on `main` for regressions, bugs, and security
   issues.
-- Use one Codex worker per reviewed commit.
+- Use one LLM worker per reviewed commit.
 - Keep reports human-readable and markdown-first.
 - Keep the storage path canonical so each commit has at most one report.
-- Avoid spending Codex time on pure documentation, changelog, asset, or other
+- Avoid spending LLM time on pure documentation, changelog, asset, or other
   non-code commits.
 - Make the lane easy to disable, manually trigger, and backfill over historic
   ranges.
@@ -33,11 +33,11 @@ Report front matter includes both commit timestamps and review timestamps:
 
 - `commit_authored_at`: author timestamp from the target commit
 - `commit_committed_at`: committer timestamp from the target commit
-- `reviewed_at`: timestamp for the ClawSweeper report generation
+- `reviewed_at`: timestamp for the SweepAI report generation
 
 Skipped non-code commits still get a report at the same path with
 `result: skipped_non_code`. This preserves a complete audit trail without
-starting Codex for commits that cannot affect runtime behavior.
+starting LLM for commits that cannot affect runtime behavior.
 
 Use the report lister for time windows instead of date-based storage folders:
 
@@ -55,7 +55,7 @@ the commit without first rediscovering a date bucket.
 ## Triggers
 
 Target repositories dispatch `push` events from `main` to
-`openclaw/clawsweeper` with `repository_dispatch`.
+`openclaw/sweepai` with `repository_dispatch`.
 
 The receiver workflow is `.github/workflows/commit-review.yml`.
 
@@ -65,7 +65,7 @@ Manual workflow dispatch supports:
 - `commit_sha`: commit SHA to review, or end of a historic range
 - `before_sha`: optional range start; when present, review every commit in
   `before_sha..commit_sha`
-- `additional_prompt`: appended to the Codex prompt for this run
+- `additional_prompt`: appended to the LLM prompt for this run
 - `create_checks`: create/update GitHub Checks. Leave blank to use the receiver
   repo variable fallback; otherwise pass `true` or `false`. The effective
   default is `false`.
@@ -74,7 +74,7 @@ Manual workflow dispatch supports:
 
 The receiver waits 15 minutes by default before selecting commits. This gives
 the target `main` push range time to settle across GitHub and the runner before
-review starts. Override it on `openclaw/clawsweeper` with:
+review starts. Override it on `openclaw/sweepai` with:
 
 ```text
 CLAWSWEEPER_COMMIT_REVIEW_SETTLE_SECONDS=900
@@ -104,11 +104,11 @@ as multiple continuation runs.
 
 ## Cheap Classification
 
-The plan job classifies each selected commit before creating the Codex matrix.
+The plan job classifies each selected commit before creating the LLM matrix.
 It uses `git diff --name-only` for normal commits and `git diff-tree` for root
 commits.
 
-Codex runs when any changed path looks reviewable:
+LLM runs when any changed path looks reviewable:
 
 - source files
 - tests
@@ -118,7 +118,7 @@ Codex runs when any changed path looks reviewable:
 - lockfiles
 - build/runtime/config files
 
-Codex is skipped when all changed paths are non-code:
+LLM is skipped when all changed paths are non-code:
 
 - docs directories
 - changelog-only changes
@@ -127,13 +127,13 @@ Codex is skipped when all changed paths are non-code:
 - common image/video/PDF assets
 
 Mixed commits are reviewed. A commit that changes both docs and code gets a
-Codex worker.
+LLM worker.
 
-## Codex Review
+## LLM Review
 
 The prompt lives in `prompts/review-commit.md`.
 
-Codex reviews the provided commit range and is expected to read beyond the diff:
+LLM reviews the provided commit range and is expected to read beyond the diff:
 
 - changed files in full
 - callers/callees
@@ -146,7 +146,7 @@ Codex reviews the provided commit range and is expected to read beyond the diff:
 
 The time budget is 30 minutes per commit.
 
-Codex returns markdown only. The front matter is small and stable so tooling can
+LLM returns markdown only. The front matter is small and stable so tooling can
 index results and optionally publish checks, but the body is meant for
 maintainers to read.
 
@@ -157,10 +157,10 @@ Expected `result` values:
 - `nothing_found`: high-confidence clean review
 - `findings`: concrete potential bug, regression, or security issue
 - `inconclusive`: insufficient confidence or blocked verification
-- `failed`: Codex/tooling failed before a reliable report
+- `failed`: LLM/tooling failed before a reliable report
 - `skipped_non_code`: cheap classifier skipped a non-code-only commit
 
-Issue categories Codex looks for:
+Issue categories LLM looks for:
 
 - bug
 - regression
@@ -177,19 +177,19 @@ The prompt explicitly excludes style nits, broad refactor taste, generic
 cleanliness feedback, speculative security concerns without an executable path,
 and test coverage complaints without a concrete risk.
 
-## ClawSweeper Repair Dispatch
+## SweepAI Repair Dispatch
 
 After reports are committed, `.github/workflows/commit-review.yml` can dispatch
 actionable `result: findings` reports to this repo's
 `repair-commit-finding-intake.yml` workflow. The older
 `repository_dispatch` mode is still available in the CLI for tests or future
 App-permission changes, but the workflow uses `workflow_dispatch` so the
-ClawSweeper App only needs Actions write access on `openclaw/clawsweeper`.
+SweepAI App only needs Actions write access on `openclaw/sweepai`.
 
-The dispatch is intentionally report-based. ClawSweeper sends the target repo,
+The dispatch is intentionally report-based. SweepAI sends the target repo,
 commit SHA, report repo, report path, report URL, severity, check conclusion,
 and source run URL. The repair intake fetches the report from latest
-`openclaw/clawsweeper@main`, writes an audit record, and decides whether an
+`openclaw/sweepai@main`, writes an audit record, and decides whether an
 automatic PR makes sense on latest target `main`.
 
 Disable this without code changes by setting:
@@ -198,7 +198,7 @@ Disable this without code changes by setting:
 CLAWSWEEPER_COMMIT_FINDINGS_ENABLED=false
 ```
 
-The ClawSweeper repair lane owns the PR lifecycle, validation, branch reuse, and
+The SweepAI repair lane owns the PR lifecycle, validation, branch reuse, and
 no-merge gate. Security-sensitive findings should remain audit-only.
 
 ## Optional GitHub Checks
@@ -206,7 +206,7 @@ no-merge gate. Security-sensitive findings should remain audit-only.
 The check name is:
 
 ```text
-ClawSweeper Commit Review
+SweepAI Commit Review
 ```
 
 Check conclusions:
@@ -214,9 +214,9 @@ Check conclusions:
 - `success`: high-confidence clean report or skipped non-code commit
 - `failure`: high-confidence high/critical finding
 - `neutral`: lower-severity finding, inconclusive review, or failed review
-- `timed_out`: Codex timed out
+- `timed_out`: LLM timed out
 
-Checks are created on the target repository commit by the ClawSweeper GitHub
+Checks are created on the target repository commit by the SweepAI GitHub
 App. They behave like CI in GitHub's UI, but are separate from the target
 repository's normal test workflows.
 
@@ -229,7 +229,7 @@ variable in the target repository that runs the dispatch workflow:
 CLAWSWEEPER_COMMIT_REVIEW_CREATE_CHECKS=true
 ```
 
-The receiver also honors the same variable on `openclaw/clawsweeper` when a
+The receiver also honors the same variable on `openclaw/sweepai` when a
 manual or repository dispatch omits `create_checks`.
 
 Commit Sweeper does not post comments. Markdown reports are the primary public
@@ -237,12 +237,12 @@ surface; checks are an optional secondary surface.
 
 ## Safety
 
-The review worker receives only target read credentials while Codex runs. The
-Codex subprocess gets that read token as `GH_TOKEN` so it can hydrate mentioned
+The review worker receives only target read credentials while LLM runs. The
+LLM subprocess gets that read token as `GH_TOKEN` so it can hydrate mentioned
 issues, PRs, workflow runs, and commit metadata during review.
-Write/check credentials are created only after Codex exits.
+Write/check credentials are created only after LLM exits.
 
-The Codex environment strips GitHub and app secrets before subprocess launch.
+The LLM environment strips GitHub and app secrets before subprocess launch.
 
 Commit Sweeper is main-only. PR or branch review is deliberately out of scope
 for this lane.
@@ -272,4 +272,4 @@ Reports are always written either way.
 - `src/commit-sweeper.ts`: commit review CLI
 - `src/commit-classifier.ts`: cheap path classifier and skipped reports
 - `src/commit-checks.ts`: GitHub Check Run publishing
-- `prompts/review-commit.md`: Codex review prompt
+- `prompts/review-commit.md`: LLM review prompt

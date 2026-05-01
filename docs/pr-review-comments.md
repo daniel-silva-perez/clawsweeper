@@ -1,18 +1,18 @@
 # PR Review Comments and Repair Markers
 
-Read when: changing issue/PR review comments, ClawSweeper repair dispatch,
-comment-sync behavior, or the trusted marker contract between ClawSweeper review
+Read when: changing issue/PR review comments, SweepAI repair dispatch,
+comment-sync behavior, or the trusted marker contract between SweepAI review
 and repair lanes.
 
 ## Purpose
 
-ClawSweeper keeps one durable public Codex review comment per issue or pull
+SweepAI keeps one durable public LLM review comment per issue or pull
 request. The comment is for maintainers first: it should explain the current
 verdict, the concrete required change, what evidence was checked, and any
 remaining risk.
 
-For ClawSweeper repair PRs, the same comment also carries hidden HTML markers
-that the repair lane can parse without relying on prose. ClawSweeper owns review
+For SweepAI repair PRs, the same comment also carries hidden HTML markers
+that the repair lane can parse without relying on prose. SweepAI owns review
 marker emission, branch mutation, duplicate guards, audit logging, and PR repair
 inside this repo.
 
@@ -21,21 +21,21 @@ inside this repo.
 Each synced comment includes the durable identity marker:
 
 ```html
-<!-- clawsweeper-review item=<number> -->
+<!-- sweepai-review item=<number> -->
 ```
 
-ClawSweeper edits that comment in place instead of posting repeated comments.
+SweepAI edits that comment in place instead of posting repeated comments.
 Report front matter stores the synced comment id, URL, hash, and sync time.
 
-When review starts and no ClawSweeper-owned comment exists yet, the review
+When review starts and no SweepAI-owned comment exists yet, the review
 shard posts a short status placeholder with the same durable identity marker.
-The placeholder is intentionally light and crustacean-friendly, then the final
+The placeholder is intentionally light and friendly, then the final
 review sync edits that exact comment in place.
 
 For a PR that needs work, the visible comment starts with:
 
 ```text
-Codex review: needs changes before merge.
+LLM review: needs changes before merge.
 ```
 
 The body should include the strongest actionable, non-overlapping sections the

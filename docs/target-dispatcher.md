@@ -1,23 +1,23 @@
 # Target Repository Dispatcher
 
-`openclaw/clawsweeper` cannot receive native `issues` or `pull_request` events
+`openclaw/sweepai` cannot receive native `issues` or `pull_request` events
 from sibling repositories directly. Target repositories should forward those
-events with `repository_dispatch` so ClawSweeper can run a single-job exact
+events with `repository_dispatch` so SweepAI can run a single-job exact
 one-item review, sync the durable review comment, and immediately apply a safe
 close proposal for that same item.
 
 This document covers issue and PR item dispatch. Commit review dispatch is
 documented separately in [commit-dispatcher.md](commit-dispatcher.md). A target
 repository can keep the two lanes in separate workflow files or combine them in
-one `.github/workflows/clawsweeper-dispatch.yml`; `openclaw/openclaw` uses the
+one `.github/workflows/sweepai-dispatch.yml`; `openclaw/openclaw` uses the
 combined form.
 
 For issue and PR dispatch, copy this workflow into each target repository as
-`.github/workflows/clawsweeper-dispatch.yml`, or merge these triggers and the
-`Dispatch exact ClawSweeper review` step into an existing combined dispatcher:
+`.github/workflows/sweepai-dispatch.yml`, or merge these triggers and the
+`Dispatch exact SweepAI review` step into an existing combined dispatcher:
 
 ```yaml
-name: ClawSweeper Dispatch
+name: SweepAI Dispatch
 
 on:
   issues:
@@ -31,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: clawsweeper-dispatch-${{ github.repository }}-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  group: sweepai-dispatch-${{ github.repository }}-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event.action == 'edited' || github.event.action == 'synchronize' || github.event.action == 'ready_for_review' }}
 
 jobs:
@@ -47,7 +47,7 @@ jobs:
         if: ${{ github.event.action == 'labeled' || github.event.action == 'unlabeled' }}
         run: sleep 20
 
-      - name: Create ClawSweeper dispatch token
+      - name: Create SweepAI dispatch token
         id: token
         if: ${{ env.HAS_CLAWSWEEPER_APP_PRIVATE_KEY == 'true' }}
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
@@ -55,7 +55,7 @@ jobs:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
           owner: openclaw
-          repositories: clawsweeper
+          repositories: sweepai
           permission-contents: write
 
       - name: Create target comment token
@@ -70,7 +70,7 @@ jobs:
           permission-issues: write
           permission-pull-requests: read
 
-      - name: Dispatch exact ClawSweeper review
+      - name: Dispatch exact SweepAI review
         if: ${{ github.event_name != 'issue_comment' }}
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -81,7 +81,7 @@ jobs:
           SOURCE_ACTION: ${{ github.event.action }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::notice::Skipping ClawSweeper dispatch because no dispatch credential is configured."
+            echo "::notice::Skipping SweepAI dispatch because no dispatch credential is configured."
             exit 0
           fi
           payload="$(jq -nc \
@@ -91,12 +91,12 @@ jobs:
             --arg source_event "$SOURCE_EVENT" \
             --arg source_action "$SOURCE_ACTION" \
             --argjson supersedes_in_progress "$SUPERSEDES_IN_PROGRESS" \
-            '{event_type:"clawsweeper_item",client_payload:{target_repo:$target_repo,item_number:$item_number,item_kind:$item_kind,source_event:$source_event,source_action:$source_action,supersedes_in_progress:$supersedes_in_progress}}')"
-          gh api repos/openclaw/clawsweeper/dispatches \
+            '{event_type:"sweepai_item",client_payload:{target_repo:$target_repo,item_number:$item_number,item_kind:$item_kind,source_event:$source_event,source_action:$source_action,supersedes_in_progress:$supersedes_in_progress}}')"
+          gh api repos/openclaw/sweepai/dispatches \
             --method POST \
             --input - <<< "$payload"
 
-      - name: Acknowledge and dispatch ClawSweeper comment
+      - name: Acknowledge and dispatch SweepAI comment
         if: ${{ github.event_name == 'issue_comment' }}
         env:
           DISPATCH_TOKEN: ${{ steps.token.outputs.token }}
@@ -108,13 +108,13 @@ jobs:
           SOURCE_ACTION: ${{ github.event.action }}
         run: |
           if [ -z "$DISPATCH_TOKEN" ]; then
-            echo "::notice::Skipping ClawSweeper dispatch because no dispatch credential is configured."
+            echo "::notice::Skipping SweepAI dispatch because no dispatch credential is configured."
             exit 0
           fi
-          body_file="$RUNNER_TEMP/clawsweeper-comment-body.txt"
+          body_file="$RUNNER_TEMP/sweepai-comment-body.txt"
           printf '%s\n' "$COMMENT_BODY" > "$body_file"
-          if ! grep -Eiq '(^|[[:space:]])@clawsweeper\b|(^|[[:space:]])/(clawsweeper|review|automerge|autoclose)\b' "$body_file"; then
-            echo "No ClawSweeper command found in comment."
+          if ! grep -Eiq '(^|[[:space:]])@sweepai\b|(^|[[:space:]])/(sweepai|review|automerge|autoclose)\b' "$body_file"; then
+            echo "No SweepAI command found in comment."
             exit 0
           fi
           if [ -n "$TARGET_TOKEN" ]; then
@@ -129,19 +129,19 @@ jobs:
             --argjson comment_id "$COMMENT_ID" \
             --arg source_event "issue_comment" \
             --arg source_action "$SOURCE_ACTION" \
-            '{event_type:"clawsweeper_comment",client_payload:{target_repo:$target_repo,item_number:$item_number,comment_id:$comment_id,source_event:$source_event,source_action:$source_action}}')"
-          GH_TOKEN="$DISPATCH_TOKEN" gh api repos/openclaw/clawsweeper/dispatches \
+            '{event_type:"sweepai_comment",client_payload:{target_repo:$target_repo,item_number:$item_number,comment_id:$comment_id,source_event:$source_event,source_action:$source_action}}')"
+          GH_TOKEN="$DISPATCH_TOKEN" gh api repos/openclaw/sweepai/dispatches \
             --method POST \
             --input - <<< "$payload"
 ```
 
-Comments are a lightweight trigger only when the body contains a ClawSweeper
+Comments are a lightweight trigger only when the body contains a SweepAI
 command. The target workflow reacts with `eyes` immediately and dispatches
-`clawsweeper_comment` to the comment router with the exact comment id, so it
+`sweepai_comment` to the comment router with the exact comment id, so it
 does not need to wait for the scheduled sweep. Bot-authored label churn is also
 ignored. Human label changes are debounced and may run after an active
 dispatcher, but they must not cancel a content-changing dispatch before it posts
-to ClawSweeper. Content-changing events such as issue edits and PR synchronizes
+to SweepAI. Content-changing events such as issue edits and PR synchronizes
 cancel stale target-side dispatch jobs and mark their receiver dispatch as
 superseding. On the receiver, event-item runs are keyed by repository and item
 number and the newest event cancels any older receiver run for that same item,
@@ -155,10 +155,10 @@ the item is at least 30 days old.
 
 `openclaw/clawhub` dispatches are intentionally skipped while the receiver
 variable `CLAWSWEEPER_ENABLE_CLAWHUB` is not `1`. Enable it only after the
-ClawSweeper GitHub App is installed on `openclaw/clawhub`; otherwise the
+SweepAI GitHub App is installed on `openclaw/clawhub`; otherwise the
 receiver cannot mint the target read/write tokens.
 
-The event job creates only a target read token before Codex runs. The target
-write token and the repository push token are introduced after Codex exits, and
+The event job creates only a target read token before LLM runs. The target
+write token and the repository push token are introduced after LLM exits, and
 the same `apply-decisions` guard path still re-fetches the item before any
 comment or close mutation.

@@ -1,25 +1,25 @@
-# ClawSweeper Internal Feature Map
+# SweepAI Internal Feature Map
 
-Read when: changing ClawSweeper automation, debugging a generated PR, wiring
+Read when: changing SweepAI automation, debugging a generated PR, wiring
 comment commands, or deciding where a new lane belongs.
 
-This document explains how the current ClawSweeper features fit together. It is
+This document explains how the current SweepAI features fit together. It is
 an internal maintainer map, not a runbook with secrets. Keep token values,
 private key material, and one-off execution windows out of this file.
 
 ## Design Shape
 
-ClawSweeper is a conservative, targeted automation layer for OpenClaw issue and
+SweepAI is a conservative, targeted automation layer for OpenClaw issue and
 PR maintenance. It does not scan the whole backlog by itself. It takes a known
-cluster, hydrates current GitHub state, asks Codex for a structured decision,
+cluster, hydrates current GitHub state, asks LLM for a structured decision,
 then lets deterministic scripts perform the allowed writes.
 
 The core invariants:
 
 - One cluster maps to one job file.
-- One implementation path maps to one branch: `clawsweeper/<cluster-id>`.
+- One implementation path maps to one branch: `sweepai/<cluster-id>`.
 - One branch should produce or update one PR.
-- Codex workers do not get GitHub write tokens.
+- LLM workers do not get GitHub write tokens.
 - GitHub writes happen through deterministic scripts with live-state checks.
 - Merge stays closed unless a maintainer explicitly opens the merge gate.
 - Security-sensitive work is out of scope and must be routed elsewhere.
@@ -37,7 +37,7 @@ is committed before dispatch because Actions reads the job file from GitHub.
 Common creation paths:
 
 - `pnpm run repair:create-job -- --repo openclaw/openclaw --refs 123 --prompt-file /tmp/prompt.md`
-- `pnpm run repair:create-job -- --from-report ../clawsweeper/records/.../items/123.md`
+- `pnpm run repair:create-job -- --from-report ../sweepai/records/.../items/123.md`
 - gitcrawl import scripts for larger clustered backlog batches
 
 `create-job` checks for an existing matching PR or branch before writing a new
@@ -45,19 +45,19 @@ job. That is the primary duplicate-PR guard.
 
 ### Cluster Plan
 
-Path: `.clawsweeper-repair/runs/<run>/cluster-plan.json`
+Path: `.sweepai-repair/runs/<run>/cluster-plan.json`
 
 Created by `scripts/plan-cluster.ts`. It hydrates the listed GitHub refs,
 linked refs, labels, bodies, comments, PR files, PR reviews, PR review
-comments, checks, and current `main` state. The Codex worker receives this as
+comments, checks, and current `main` state. The LLM worker receives this as
 its live evidence bundle.
 
 ### Worker Result
 
-Path: `.clawsweeper-repair/runs/<run>/result.json`
+Path: `.sweepai-repair/runs/<run>/result.json`
 
-Created by `scripts/run-worker.ts` via `codex exec` using
-`schema/repair/codex-result.schema.json`. The worker can recommend actions and fix
+Created by `scripts/run-worker.ts` via `llm exec` using
+`schema/repair/llm-result.schema.json`. The worker can recommend actions and fix
 artifacts, but it must not mutate GitHub directly.
 
 `scripts/review-results.ts` validates the result before any follow-up lane
@@ -65,11 +65,11 @@ trusts it.
 
 ### Fix Artifact
 
-Path: `.clawsweeper-repair/runs/<run>/fix-artifact.json` and embedded result
+Path: `.sweepai-repair/runs/<run>/fix-artifact.json` and embedded result
 fields.
 
 A fix artifact tells the deterministic executor how to repair a contributor
-branch or create/update a ClawSweeper replacement branch. It includes likely
+branch or create/update a SweepAI replacement branch. It includes likely
 files, validation commands, credit notes, changelog requirements, source PRs,
 and the planned PR title/body.
 
@@ -83,7 +83,7 @@ Paths:
 - `docs/repair/README.md` dashboard sections
 
 These are the sanitized durable record. Full prompts, transcripts, and raw run
-artifacts stay in Actions artifacts or local `.clawsweeper-repair/runs`.
+artifacts stay in Actions artifacts or local `.sweepai-repair/runs`.
 
 ## Modes
 
@@ -100,9 +100,9 @@ and only when gates permit.
 
 ### `autonomous`
 
-Full targeted repair mode. ClawSweeper hydrates live state, asks Codex to produce
+Full targeted repair mode. SweepAI hydrates live state, asks LLM to produce
 or refine a fix plan, then `execute-fix-artifact` can repair a branch or open a
-replacement PR. Direct mutation still happens outside Codex.
+replacement PR. Direct mutation still happens outside LLM.
 
 ## Cloud Worker Flow
 
@@ -111,12 +111,12 @@ Workflow: `.github/workflows/repair-cluster-worker.yml`
 The cluster worker has two jobs:
 
 1. `cluster`
-   - checks out ClawSweeper
+   - checks out SweepAI
    - mints a read GitHub App token when configured
-   - installs Codex
+   - installs LLM
    - validates the job
    - hydrates the cluster
-   - runs Codex in read-only mode
+   - runs LLM in read-only mode
    - reviews the structured result
    - uploads transfer artifacts
 
@@ -127,7 +127,7 @@ The cluster worker has two jobs:
    - runs `execute-fix-artifact`
    - runs `apply-result`
    - runs `post-flight`
-   - labels ClawSweeper targets
+   - labels SweepAI targets
    - uploads final artifacts
 
 The workflow concurrency group is based on job path and mode, so repeat
@@ -144,17 +144,17 @@ It can:
 - update a maintainer-editable contributor branch when that path is safe
 - fall back to a replacement branch when the source branch is uneditable or
   unsafe
-- create or update `clawsweeper/<cluster-id>`
-- push checkpoint commits after Codex edits
+- create or update `sweepai/<cluster-id>`
+- push checkpoint commits after LLM edits
 - run changed-surface validation
-- run Codex `/review`
-- address Codex review findings
+- run LLM `/review`
+- address LLM review findings
 - open or update the target PR
 - post an idempotent adopted-automerge outcome comment when no executable fix
   artifact is available
 - preserve contributor credit in co-author trailers, PR body, and closeout comments
 
-The executor prepares a temporary checkout of the target repo. Codex edits that
+The executor prepares a temporary checkout of the target repo. LLM edits that
 checkout without GitHub credentials. The deterministic executor commits,
 pushes, opens PRs, and comments using the GitHub token.
 
@@ -164,57 +164,57 @@ checkpoint commits, records carried-forward credit in the replacement PR body,
 and says in the source close comment that the contribution is carried forward
 rather than rejected.
 
-Generated ClawSweeper PRs are marked by:
+Generated SweepAI PRs are marked by:
 
-- branch prefix: `clawsweeper/`
+- branch prefix: `sweepai/`
 - committed repair job metadata for the branch cluster id
 
-The `clawsweeper` label is a reporting hint from `scripts/tag-clawsweeper-targets.ts`,
+The `sweepai` label is a reporting hint from `scripts/tag-sweepai-targets.ts`,
 not a PR identity boundary.
 
 Current operational gotcha: OpenClaw's PR queue policy can close PRs when the
-ClawSweeper app author has more than 10 active PRs. That is a target-repo policy
+SweepAI app author has more than 10 active PRs. That is a target-repo policy
 interaction, not evidence that the generated PR is invalid. Reduce or land the
-active ClawSweeper queue before reopening those PRs.
+active SweepAI queue before reopening those PRs.
 
 Replacement PR creation also has a per-area backpressure guard. Before opening a
-new `clawsweeper/*` replacement branch, `execute-fix-artifact` groups the proposed
+new `sweepai/*` replacement branch, `execute-fix-artifact` groups the proposed
 `likely_files` into touched areas such as `extensions/discord`, `src/core`, or
-`docs`, reads open ClawSweeper PRs in the target repo, and blocks if the same area
-already has `CLAWSWEEPER_MAX_ACTIVE_PRS_PER_AREA` open ClawSweeper PRs. The default
+`docs`, reads open SweepAI PRs in the target repo, and blocks if the same area
+already has `CLAWSWEEPER_MAX_ACTIVE_PRS_PER_AREA` open SweepAI PRs. The default
 limit is `50`; set it to `0` only for a deliberately uncapped execution window.
 Common changelog and release-note files are ignored for this backpressure check
 because they are shared support files rather than a meaningful repair area.
 
-## ClawSweeper Commit Findings
+## SweepAI Commit Findings
 
 Workflow: `.github/workflows/repair-commit-finding-intake.yml`
 Script: `scripts/commit-finding-intake.ts`
 
-ClawSweeper can dispatch `clawsweeper_commit_finding` when a main-branch commit
-review report has `result: findings`. ClawSweeper treats that report as a source
+SweepAI can dispatch `sweepai_commit_finding` when a main-branch commit
+review report has `result: findings`. SweepAI treats that report as a source
 finding, not as an order to open a PR.
 
-The intake step fetches the report from latest `openclaw/clawsweeper@main`,
+The intake step fetches the report from latest `openclaw/sweepai@main`,
 writes one audit file, and then decides whether an automatic repair PR is
 allowed:
 
 - audit path: `results/commit-findings/<repo-slug>/<sha>.md`
-- job path: `jobs/<owner>/inbox/clawsweeper-commit-<repo-slug>-<shortsha>.md`
-- branch: `clawsweeper/clawsweeper-commit-<repo-slug>-<shortsha>`
+- job path: `jobs/<owner>/inbox/sweepai-commit-<repo-slug>-<shortsha>.md`
+- branch: `sweepai/sweepai-commit-<repo-slug>-<shortsha>`
 
 Non-finding, disabled, security/privacy/supply-chain, and broad findings stop
 at the audit record. Eligible ordinary bug/regression/reliability findings get a
-deterministic synthetic ClawSweeper result and fix artifact. That skips the normal
-cluster-planning Codex pass and sends the report straight to
-`execute-fix-artifact`, where Codex is used for the repair loop against latest
+deterministic synthetic SweepAI result and fix artifact. That skips the normal
+cluster-planning LLM pass and sends the report straight to
+`execute-fix-artifact`, where LLM is used for the repair loop against latest
 target `main`.
 
 Commit-finding fix artifacts set `allow_no_pr: true`. If the repair loop
-verifies the report but produces no target-repo diff, ClawSweeper records a clean
+verifies the report but produces no target-repo diff, SweepAI records a clean
 skipped no-PR outcome instead of failing the workflow.
 
-The generated job uses `source: clawsweeper_commit` and may have no issue/PR
+The generated job uses `source: sweepai_commit` and may have no issue/PR
 `candidates`. The fix artifact uses `repair_strategy: new_fix_pr`; merge and
 close actions remain blocked.
 
@@ -245,11 +245,11 @@ Merging is intentionally hard. Merge requires:
 - clean relevant checks
 - resolved human review threads
 - resolved review-bot findings
-- passed Codex `/review`
+- passed LLM `/review`
 - validation evidence
 - security clearance
 
-With merge gated closed, ClawSweeper labels ready candidates for human review
+With merge gated closed, SweepAI labels ready candidates for human review
 instead of merging.
 
 ## Post-Flight Finalization
@@ -271,8 +271,8 @@ for duplicate or superseded items covered by that fix.
 Workflow: `.github/workflows/finalize-open-prs.yml`
 Script: `scripts/finalize-open-prs.ts`
 
-The finalizer scans open ClawSweeper PRs in the target repo. It finds PRs by the
-`clawsweeper/*` branch prefix. It classifies blockers:
+The finalizer scans open SweepAI PRs in the target repo. It finds PRs by the
+`sweepai/*` branch prefix. It classifies blockers:
 
 - draft
 - stale/conflicting branch
@@ -293,17 +293,17 @@ This is the lane to extend for richer CI self-repair. The next improvement is
 to fetch compact failed-check logs, classify transient infra failures, rerun
 clearly transient jobs, and pass branch-caused failures into the repair prompt.
 
-## Self-Heal Failed ClawSweeper Runs
+## Self-Heal Failed SweepAI Runs
 
 Workflow: `.github/workflows/repair-self-heal.yml`
 Script: `src/repair/self-heal-failed-runs.ts`
 
-Self-heal retries failed ClawSweeper cluster-worker runs. It reads published
+Self-heal retries failed SweepAI cluster-worker runs. It reads published
 `results/runs/*.json`, selects the latest failed run per source job, skips jobs
 already retried unless `--allow-repeat` is set, and dispatches fresh worker
 runs.
 
-Important distinction: this heals failed ClawSweeper worker runs. It does not
+Important distinction: this heals failed SweepAI worker runs. It does not
 currently inspect target PR CI logs. Target PR repair belongs in the open PR
 finalizer/comment command repair path.
 
@@ -327,89 +327,89 @@ Contributor comments are ignored without a reply.
 
 The generated-PR auto-update design is documented in
 [`docs/repair/auto-update-prs.md`](auto-update-prs.md). That lane lets trusted
-ClawSweeper comments dispatch a repair run for an existing ClawSweeper PR or a
-PR explicitly opted into `clawsweeper:automerge` without allowing arbitrary
+SweepAI comments dispatch a repair run for an existing SweepAI PR or a
+PR explicitly opted into `sweepai:automerge` without allowing arbitrary
 comment authors to trigger work.
 
 Accepted command styles:
 
 ```text
-/clawsweeper status
-@clawsweeper status
-@openclaw-clawsweeper status
-@openclaw-clawsweeper[bot] status
+/sweepai status
+@sweepai status
+@openclaw-sweepai status
+@openclaw-sweepai[bot] status
 ```
 
-Accepted mentions are `@clawsweeper`, `@clawsweeper[bot]`,
-`@openclaw-clawsweeper`, and `@openclaw-clawsweeper[bot]`.
+Accepted mentions are `@sweepai`, `@sweepai[bot]`,
+`@openclaw-sweepai`, and `@openclaw-sweepai[bot]`.
 
 Supported commands:
 
 ```text
 /review
-/clawsweeper status
-/clawsweeper re-review
-/clawsweeper fix ci
-/clawsweeper address review
-/clawsweeper rebase
-/clawsweeper autofix
-/clawsweeper automerge
-/clawsweeper approve
-/clawsweeper explain
-/clawsweeper stop
-@clawsweeper re-review
-@clawsweeper review
-@openclaw-clawsweeper fix ci
-@clawsweeper why did automerge stop here?
+/sweepai status
+/sweepai re-review
+/sweepai fix ci
+/sweepai address review
+/sweepai rebase
+/sweepai autofix
+/sweepai automerge
+/sweepai approve
+/sweepai explain
+/sweepai stop
+@sweepai re-review
+@sweepai review
+@openclaw-sweepai fix ci
+@sweepai why did automerge stop here?
 ```
 
 Behavior:
 
 - `status` and `explain`: post a short status response.
-- `review` and `re-review`: dispatch ClawSweeper review again for an open issue
+- `review` and `re-review`: dispatch SweepAI review again for an open issue
   or PR.
-- Freeform `@clawsweeper ...` maintainer mentions: dispatch a read-only assist
+- Freeform `@sweepai ...` maintainer mentions: dispatch a read-only assist
   review with the mention text as one-off instructions. The model can answer or
   recommend existing structured safe actions, but cannot directly merge, close,
   label, or push code.
-- `fix ci`: dispatch the existing ClawSweeper PR's job for repair.
-- `address review`: dispatch the existing ClawSweeper PR's job for repair.
-- `rebase`: dispatch the existing ClawSweeper PR's job for repair.
-- `autofix`: label any open PR with `clawsweeper:autofix`, create an adopted
-  job if needed, and dispatch a ClawSweeper review for the current head without
+- `fix ci`: dispatch the existing SweepAI PR's job for repair.
+- `address review`: dispatch the existing SweepAI PR's job for repair.
+- `rebase`: dispatch the existing SweepAI PR's job for repair.
+- `autofix`: label any open PR with `sweepai:autofix`, create an adopted
+  job if needed, and dispatch a SweepAI review for the current head without
   allowing merge.
-- `automerge`: label any open PR with `clawsweeper:automerge`, create an
-  adopted job if needed, and dispatch a ClawSweeper review for the current
+- `automerge`: label any open PR with `sweepai:automerge`, create an
+  adopted job if needed, and dispatch a SweepAI review for the current
   head.
 - `approve`: maintainer-only exact-head approval after human review; clears
   pause labels and merges only through the normal automerge readiness checks and
   merge gates.
 - `stop`: label the item for human review.
 
-Repair commands apply to existing ClawSweeper PRs and PRs opted into
-`clawsweeper:autofix` or `clawsweeper:automerge`. The router finds ClawSweeper PRs by the
-`clawsweeper/*` branch, resolves or creates the backing job, posts one
+Repair commands apply to existing SweepAI PRs and PRs opted into
+`sweepai:autofix` or `sweepai:automerge`. The router finds SweepAI PRs by the
+`sweepai/*` branch, resolves or creates the backing job, posts one
 idempotent response marker, and dispatches `repair-cluster-worker.yml`.
 
-Trusted ClawSweeper comments become `clawsweeper_auto_repair`. Preferred
-comments use hidden `clawsweeper-verdict:*` markers and include
-`clawsweeper-action:fix-required` only when ClawSweeper should wake up. For PRs
-already opted into `clawsweeper:autofix` or `clawsweeper:automerge`, trusted
+Trusted SweepAI comments become `sweepai_auto_repair`. Preferred
+comments use hidden `sweepai-verdict:*` markers and include
+`sweepai-action:fix-required` only when SweepAI should wake up. For PRs
+already opted into `sweepai:autofix` or `sweepai:automerge`, trusted
 `needs-human` and `human-review` verdicts pause the loop with
-`clawsweeper:human-review`. Repair dispatch requires an accepted repair verdict
+`sweepai:human-review`. Repair dispatch requires an accepted repair verdict
 or action marker. The default caps are ten automatic repair iterations per PR
 and one dispatch per PR head SHA. The per-PR cap is total across head SHA
 changes, so repeated findings on the same commit do not stampede the branch and
 a single PR cannot loop forever.
 
-For PRs labeled `clawsweeper:autofix` or `clawsweeper:automerge`, trusted
-ClawSweeper `pass`, `approved`, or `no-changes` verdict markers become
-`clawsweeper_auto_merge`. Autofix and draft PRs never merge. Automerge merges
+For PRs labeled `sweepai:autofix` or `sweepai:automerge`, trusted
+SweepAI `pass`, `approved`, or `no-changes` verdict markers become
+`sweepai_auto_merge`. Autofix and draft PRs never merge. Automerge merges
 only when the marker SHA matches the current PR head, checks are green, GitHub
 mergeability is clean, no human-review label is present, the PR is not draft,
 and both `CLAWSWEEPER_ALLOW_MERGE=1` and `CLAWSWEEPER_ALLOW_AUTOMERGE=1` are set.
-Otherwise it leaves the PR open and labels it `clawsweeper:human-review` and
-`clawsweeper:merge-ready` when merge gates are closed.
+Otherwise it leaves the PR open and labels it `sweepai:human-review` and
+`sweepai:merge-ready` when merge gates are closed.
 
 The scheduled workflow is dry by default. Set
 `CLAWSWEEPER_COMMENT_ROUTER_EXECUTE=1` to let scheduled runs post replies and
@@ -428,13 +428,13 @@ instead of leaving duplicate crustacean notes.
 
 ## Label Backfill
 
-Script: `scripts/tag-clawsweeper-targets.ts`
+Script: `scripts/tag-sweepai-targets.ts`
 
-This script labels ClawSweeper-created or ClawSweeper-tracked PRs/issues in the
+This script labels SweepAI-created or SweepAI-tracked PRs/issues in the
 target repo. It helps downstream tools and maintainers distinguish generated
 work from ordinary contributor work.
 
-The exact label is `clawsweeper`. The script intentionally refuses alternate
+The exact label is `sweepai`. The script intentionally refuses alternate
 label names to keep the marker stable.
 
 ## Job Hygiene
@@ -445,7 +445,7 @@ Scripts:
 - `scripts/promote-stuck-jobs.ts`
 - `scripts/requeue-job.ts`
 
-These scripts manage the ClawSweeper backlog:
+These scripts manage the SweepAI backlog:
 
 - move finalized jobs out of inbox
 - park old or never-run jobs in outbox/stuck
@@ -475,10 +475,10 @@ Important gates:
   any value except literal `1` as closed.
 - `CLAWSWEEPER_ALLOW_FIX_PR`: allows branch repair and replacement PR creation.
   Workflows treat any value except literal `1` as closed.
-- `CLAWSWEEPER_ALLOW_MERGE`: allows ClawSweeper to merge. Keep this `0` unless a
+- `CLAWSWEEPER_ALLOW_MERGE`: allows SweepAI to merge. Keep this `0` unless a
   maintainer explicitly opens it.
 - `CLAWSWEEPER_ALLOW_AUTOMERGE`: allows the comment router to merge a
-  `clawsweeper:automerge` PR after ClawSweeper passes the exact current head.
+  `sweepai:automerge` PR after SweepAI passes the exact current head.
   Keep this `0` unless a maintainer explicitly opens an automerge window.
 - `CLAWSWEEPER_COMMENT_ROUTER_EXECUTE`: lets scheduled comment routing post
   replies and dispatch workers.
@@ -490,9 +490,9 @@ Important defaults:
   difficult repair work.
 - `CLAWSWEEPER_MAX_LIVE_WORKERS`: dispatch capacity guard.
 - `CLAWSWEEPER_MAX_ACTIVE_PRS_PER_AREA`: replacement PR area backpressure; default
-  is `50` open ClawSweeper PRs per touched area, and `0` disables the cap.
-- ClawSweeper commit-finding repair PRs get the `clawsweeper:commit-finding`
-  label in addition to the standard `clawsweeper` tracking label.
+  is `50` open SweepAI PRs per touched area, and `0` disables the cap.
+- SweepAI commit-finding repair PRs get the `sweepai:commit-finding`
+  label in addition to the standard `sweepai` tracking label.
 - `CLAWSWEEPER_TARGET_VALIDATION_MODE`: changed-only validation by default.
 - `CLAWSWEEPER_RESOLVE_REVIEW_THREADS`: lets fix execution resolve threads after
   it addresses them.
@@ -526,7 +526,7 @@ For live lanes, dry-run first when available:
 ```bash
 pnpm run repair:comment-router -- --repo openclaw/openclaw --lookback-minutes 180
 pnpm run repair:finalize-open-prs -- --write-report
-pnpm run repair:tag-clawsweeper -- --live
+pnpm run repair:tag-sweepai -- --live
 ```
 
 Do not treat a dry report as permission to mutate. A maintainer still needs to

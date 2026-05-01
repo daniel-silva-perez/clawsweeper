@@ -1,8 +1,8 @@
 # Work Lane
 
-ClawSweeper reviews remain proposal-only. A review may now mark an open item as
+SweepAI reviews remain proposal-only. A review may now mark an open item as
 a `queue_fix_pr` work candidate when the report looks valid, narrow, and safe
-for a single ClawSweeper repair PR.
+for a single SweepAI repair PR.
 
 Reports store the lane fields in frontmatter:
 
@@ -17,13 +17,13 @@ The dashboard shows fresh `queue_fix_pr` reports whose `work_status` is
 Promote a candidate from this checkout:
 
 ```bash
-cd ~/Projects/clawsweeper
+cd ~/Projects/sweepai
 pnpm run repair:create-job -- \
   --from-report records/openclaw-openclaw/items/123.md
-pnpm run repair:validate-job -- jobs/openclaw/inbox/clawsweeper-openclaw-openclaw-123.md
+pnpm run repair:validate-job -- jobs/openclaw/inbox/sweepai-openclaw-openclaw-123.md
 ```
 
 Commit and push the generated job, then dispatch `mode: autonomous` when the
 execution window is intentionally open. The repair lane checks for an existing
-open PR/body match and the `clawsweeper/<cluster-id>` branch before creating a
+open PR/body match and the `sweepai/<cluster-id>` branch before creating a
 duplicate job.
