@@ -7,11 +7,95 @@ currently covers `openclaw/openclaw`, `openclaw/clawhub`, and self-review for
 It has two independent lanes:
 
 - issue/PR sweeper: keeps one markdown report per open issue or PR, publishes
-  one durable Codex automated review comment when useful, and only closes items
+  one durable automated review comment when useful, and only closes items
   when the evidence is strong
 - commit sweeper: reviews code-bearing commits that land on `main`, writes one
   canonical markdown report per commit, and optionally publishes a GitHub Check
   Run for that commit
+
+## Model-Agnostic LLM Support
+
+ClawSweeper now supports multiple LLM providers via a unified abstraction layer
+(`src/llm-providers.ts`). The default remains OpenAI Codex, but you can swap to
+Claude Code, Gemini, OpenCode, or Kimi with an environment variable.
+
+### Supported Providers
+
+| Provider | CLI Command | Status | Notes |
+|----------|------------|--------|-------|
+| **Codex** (OpenAI) | `codex exec` | ✅ Production | Full schema enforcement, sandboxing, structured output |
+| **Claude Code** (Anthropic) | `claude -p` | ⚠️ Beta | Best-effort JSON extraction from markdown |
+| **Gemini** (Google) | `gemini run` | ⚠️ Experimental | Prompt-file input, JSON format flag |
+| **OpenCode** | `opencode run` | ⚠️ Beta | Direct passthrough, model-agnostic |
+| **Kimi** (Moonshot AI) | `kimi run` | ⚠️ Beta | Prompt-based wrapper |
+
+### Quick Start
+
+```bash
+# Default: OpenAI Codex
+pnpm run review
+
+# Claude Code
+LLM_PROVIDER=claude LLM_MODEL=claude-sonnet-4 pnpm run review
+
+# Gemini
+LLM_PROVIDER=gemini LLM_MODEL=gemini-2.5-pro pnpm run review
+
+# OpenCode
+LLM_PROVIDER=opencode LLM_MODEL=gpt-4o pnpm run review
+
+# Kimi
+LLM_PROVIDER=kimi LLM_MODEL=kimi-k2 pnpm run review
+```
+
+### Configuration
+
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `LLM_PROVIDER` | `codex` | Provider: `codex`, `claude`, `gemini`, `opencode`, `kimi` |
+| `LLM_MODEL` | `gpt-5.5` | Model identifier (provider-specific) |
+| `LLM_REASONING_EFFORT` | `high` | Reasoning depth: `low`, `medium`, `high` |
+| `LLM_SERVICE_TIER` | `fast` | Priority: `fast`, `default` |
+| `LLM_SANDBOX` | `read-only` | Sandbox mode (Codex only) |
+
+Legacy `CODEX_*` env vars and `--codex-*` CLI flags still work as fallbacks.
+
+### Provider-Specific Setup
+
+**Claude Code:**
+```bash
+npm install -g @anthropic-ai/claude-code
+claude config set login_method api
+# Set ANTHROPIC_API_KEY in your environment
+```
+
+**Gemini:**
+```bash
+npm install -g @google/gemini-cli
+# Set GEMINI_API_KEY in your environment
+```
+
+**OpenCode:**
+```bash
+npm install -g opencode
+# Set OPENCODE_API_KEY or provider-specific key
+```
+
+**Kimi:**
+```bash
+npm install -g kimi-cli
+# Set MOONSHOT_API_KEY in your environment
+```
+
+### Caveats
+
+Non-Codex providers lack native support for:
+- `--output-schema` structured JSON enforcement
+- `--sandbox` filesystem isolation
+- `--output-last-message` guaranteed file writes
+
+Output extraction is best-effort. For production use with non-Codex providers,
+add a JSON schema validation step (e.g., `ajv`) after the LLM call.
 
 ## Capabilities
 
@@ -21,7 +105,7 @@ It has two independent lanes:
 - **Issue and PR intake:** scheduled runs scan open issues and pull requests,
   while target repositories can forward exact issue/PR events with
   `repository_dispatch` for low-latency one-item reviews.
-- **Codex review reports:** each issue or PR becomes
+- **LLM review reports:** each issue or PR becomes
   `records/<repo-slug>/items/<number>.md` with the decision, evidence, proposed
   maintainer-facing comment, runtime metadata, and GitHub snapshot hash.
 - **Durable review comments:** ClawSweeper syncs one marker-backed public review
