@@ -1,7 +1,26 @@
 {
   "name": "sweepai",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
+  "description": "Model-agnostic AI maintenance bot for GitHub repositories. Forked from clawsweeper, rebuilt with pluggable LLM providers.",
+  "author": "Daniel Silva Perez <daniel.silva.perez@gmail.com>",
+  "homepage": "https://github.com/daniel-silva-perez/sweepai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/daniel-silva-perez/sweepai.git"
+  },
+  "keywords": [
+    "github",
+    "automation",
+    "ai",
+    "llm",
+    "maintenance",
+    "bot",
+    "typescript",
+    "codex",
+    "claude",
+    "gemini",
+    "open-source"
+  ],
   "license": "MIT",
   "type": "module",
   "scripts": {
